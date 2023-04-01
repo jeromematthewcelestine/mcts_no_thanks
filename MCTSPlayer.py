@@ -1,36 +1,15 @@
-from __future__ import division
-
 import random
 from itertools import cycle
 import datetime
 from math import log, sqrt
-import no_thanks
 import pickle
+import no_thanks
 
-class BasicComputerPlayer():
-    def __init__(self, board):
-        self.calculation_time = datetime.timedelta(seconds = 1)
-        self.board = board
+import os, psutil
 
-    def get_action(self, history):
-        moves = {}
-
-        state = history[-1]
-        state = self.board.pack_state(state)
-
-        default_action = ACTION_PASS
-        other_action = ACTION_TAKE
-
-        if self.board.is_legal(state, default_action):
-            action = default_action
-        else:
-            action = other_action
-
-        return action
 
 class MCTSPlayer():
-    def __init__(self, board, thinking_time = 1, filepath = None):
-        self.board = board
+    def __init__(self, n_players = 3, thinking_time = 1, min_card = 3, max_card = 33, filepath = None):
 
         self.thinking_time = thinking_time
         self.max_moves = 200
@@ -38,31 +17,49 @@ class MCTSPlayer():
         self.wins = {}
         self.plays = {}
 
+        self.min_card = 3
+        self.max_card = 33
+
+        self.n_players = n_players
+
         if filepath:
             self.load_from(filepath)
 
-
         self.C = 1.4
 
-    def train(self, initial_state, seconds = 1):
+        process = psutil.Process(os.getpid())
+        print("memory (in bytes): ", process.memory_info().rss)  # in bytes 
+
+    def make_state_packed(self, coins, cards, card_in_play, coins_in_play, n_cards_in_deck, current_player):
+        details = (card_in_play, coins_in_play, n_cards_in_deck, current_player)
+        packed_state = tuple(coins), tuple(map(tuple, cards)), details
+        return packed_state
+
+    def train(self, seconds = 1):
         self.max_depth = 0
         games = 0
 
         calculation_time = datetime.timedelta(seconds = seconds)
 
+        
+
         begin = datetime.datetime.utcnow()
         while datetime.datetime.utcnow() - begin < calculation_time:
-            self.run_simulation(initial_state)
+            board = no_thanks.Board(self.n_players, min_card = self.min_card, max_card = self.max_card)
+            initial_state = board.pack_state(board.starting_state())
+            self.run_simulation(initial_state, board)
             games += 1
 
         print("Games played: ", games)
         print("Maximum depth searched:", self.max_depth)
         
-    def get_action(self, state,):
+    def get_action(self, state, legal_actions):
         self.max_depth = 0
+
+        board = no_thanks.Board(self.n_players)
         
-        player = self.board.current_player(state)
-        legal_actions = self.board.legal_actions(state)
+        player = state[2][3]
+        # legal_actions = self.board.legal_actions(state)
 
         if not legal_actions:
             return
@@ -70,11 +67,14 @@ class MCTSPlayer():
             return legal_actions[0]
         
         if self.thinking_time > 0:
+            
+
             games = 0
             calculation_delta = datetime.timedelta(seconds = self.thinking_time)
             begin = datetime.datetime.utcnow()
             while datetime.datetime.utcnow() - begin < calculation_delta:
-                self.run_simulation(state)
+                board = no_thanks.Board(self.n_players)
+                self.run_simulation(state, board)
                 games += 1
 
         percent_wins, action = max(
@@ -98,18 +98,18 @@ class MCTSPlayer():
 
         return action
 
-    def run_simulation(self, state):
+    def run_simulation(self, state, board):
         plays, wins = self.plays, self.wins
 
         visited_actions = set()
         # states_copy = self.states[:]
         # state = states_copy[-1]
-        player = self.board.current_player(state)
+        player = board.current_player(state)
 
         expand = True
 
         for t in range(1, self.max_moves + 1):
-            legal_actions = self.board.legal_actions(state)
+            legal_actions = board.legal_actions(state)
 
             # moves_states = [(p, self.board.next_state(state, p)) for p in legal]
             # moves_states = [(p, self.board.next_state(state, p)) for p in legal]
@@ -139,10 +139,10 @@ class MCTSPlayer():
             visited_actions.add((player, state, action))
 
             # move to next state
-            state = self.board.next_state(state, action)
+            state = board.next_state(state, action)
 
-            player = self.board.current_player(state)
-            winner = self.board.winner(state)
+            player = board.current_player(state)
+            winner = board.winner(state)
             if winner is not None:
                 break
 
@@ -167,51 +167,5 @@ class MCTSPlayer():
             self.wins = input_object["wins"]
 
 
-
-class GameMaster():
-    def __init__(self, n_players = 3):
-        self.n_players = n_players
-        self.board = no_thanks.Board(self.n_players)
-
-        mcts_player = MCTSPlayer(self.board,
-                                 thinking_time = 0.1,
-                                 filepath = "mcts_20230221_02.model")
-
-        self.players = []
-        self.players.append(no_thanks.HumanPlayer())
-        self.players.append(mcts_player)
-        self.players.append(mcts_player)
-
-    def start(self):
-        current_player = 0
-        state = self.board.starting_state()
-        history = []
-        history.append(state)
-
-        while True:
-            self.board.display_state(state)
-            action = self.players[current_player].get_action(state)
-
-            if not self.board.is_legal(state, action):
-                continue
-
-            state = self.board.next_state(state, action)
-            history.append(state)
-
-            if self.board.is_ended(state):
-                self.board.display_state(state)
-                self.board.display_scores(state)
-                winner = self.board.winner(state)
-                print("The winner is Player {0}".format(winner))
-                break
-
-            current_player += 1
-            if current_player == self.n_players:
-                current_player = 0
-
-
-if __name__=="__main__":
-    gm = GameMaster()
-    gm.start()
-
-
+if __name__ == "__main__":
+    mcts_player = MCTSPlayer("mcts_classic_4p_20230324_01.model")
